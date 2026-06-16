@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dron Object Detection</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0a0e1a; color:#e0f0ff; font-family:'Courier New',monospace; min-height:100vh; display:flex; flex-direction:column; align-items:center; }
+
+.dot { width:10px; height:10px; border-radius:50%; background:#00e5ff; animation:pulse 1.5s infinite; display:inline-block; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+header { width:100%; padding:14px 24px; background:#0d1220; border-bottom:1px solid #1e3a5f; display:flex; align-items:center; gap:12px; }
+header h1 { font-size:1rem; letter-spacing:3px; color:#00e5ff; text-transform:uppercase; }
+header span { margin-left:auto; font-size:0.75rem; color:#4a7fa5; }
+
+.main { display:flex; gap:20px; padding:20px; width:100%; max-width:1100px; flex-wrap:wrap; justify-content:center; }
+
+.video-wrap { position:relative; border:1px solid #1e3a5f; border-radius:4px; overflow:hidden; background:#050810; flex:1; min-width:280px; max-width:700px; }
+video { display:block; width:100%; height:auto; }
+canvas { position:absolute; top:0; left:0; width:100% !important; height:100% !important; }
+
+.overlay-status { position:absolute; top:10px; left:10px; background:rgba(0,0,0,0.75); border:1px solid #1e3a5f; border-radius:3px; padding:6px 12px; font-size:0.7rem; color:#00e5ff; display:flex; gap:16px; }
+.stat-item { display:flex; flex-direction:column; align-items:center; gap:2px; }
+.stat-val { font-size:1rem; font-weight:bold; color:#fff; }
+.stat-lbl { font-size:0.6rem; color:#4a7fa5; letter-spacing:1px; }
+
+.panel { width:240px; display:flex; flex-direction:column; gap:12px; }
+.card { background:#0d1220; border:1px solid #1e3a5f; border-radius:4px; padding:14px; }
+.card-title { font-size:0.65rem; letter-spacing:2px; color:#4a7fa5; text-transform:uppercase; margin-bottom:12px; border-bottom:1px solid #1e3a5f; padding-bottom:8px; }
+
+.btn { width:100%; padding:10px; border:1px solid #00e5ff; background:transparent; color:#00e5ff; font-family:'Courier New',monospace; font-size:0.8rem; letter-spacing:1px; cursor:pointer; border-radius:3px; text-transform:uppercase; transition:all 0.2s; margin-bottom:6px; }
+.btn:hover { background:#00e5ff; color:#0a0e1a; }
+.btn:disabled { opacity:0.3; cursor:not-allowed; }
+.btn.red { border-color:#ff4d4d; color:#ff4d4d; }
+.btn.red:hover { background:#ff4d4d; color:#fff; }
+
+.slider-row { display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
+.slider-row label { font-size:0.7rem; color:#4a7fa5; display:flex; justify-content:space-between; }
+.slider-row label span { color:#00e5ff; }
+input[type=range] { width:100%; accent-color:#00e5ff; }
+
+#obj-list { display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; }
+.obj-item { display:flex; justify-content:space-between; align-items:center; padding:5px 8px; background:#0a0e1a; border-left:2px solid #00e5ff; border-radius:2px; font-size:0.72rem; }
+.obj-name { color:#e0f0ff; }
+.obj-conf { color:#00e5ff; font-weight:bold; }
+.obj-count { background:#1e3a5f; color:#fff; border-radius:10px; padding:1px 7px; font-size:0.65rem; }
+.empty { color:#2a4a6a; font-size:0.75rem; text-align:center; padding:20px 0; }
+
+#status-bar { width:100%; max-width:1100px; padding:8px 20px; font-size:0.7rem; color:#4a7fa5; border-top:1px solid #1e3a5f; margin-top:auto; }
+#status-msg { color:#00e5ff; }
+
+#loading { position:fixed; inset:0; background:#0a0e1a; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:100; }
+#loading h2 { color:#00e5ff; letter-spacing:3px; font-size:1rem; }
+#loading p { color:#4a7fa5; font-size:0.8rem; text-align:center; max-width:280px; }
+.progress-bar { width:240px; height:2px; background:#1e3a5f; border-radius:2px; overflow:hidden; }
+.progress-fill { height:100%; background:#00e5ff; animation:prog 1.8s ease-in-out infinite; }
+@keyframes prog { 0%{width:0%} 60%{width:80%} 100%{width:100%} }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="dot" style="width:16px;height:16px"></div>
+  <h2>DRON DETECTOR</h2>
+  <p id="load-msg">Model yuklanmoqda, biroz kuting...</p>
+  <div class="progress-bar"><div class="progress-fill"></div></div>
+</div>
+
+<header>
+  <div class="dot"></div>
+  <h1>Dron · Object Detection</h1>
+  <span id="model-tag">COCO-SSD · 80 sinf</span>
+</header>
+
+<div class="main">
+  <div class="video-wrap">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="canvas"></canvas>
+    <div class="overlay-status">
+      <div class="stat-item"><span class="stat-val" id="fps-val">0</span><span class="stat-lbl">FPS</span></div>
+      <div class="stat-item"><span class="stat-val" id="obj-count-val">0</span><span class="stat-lbl">OB'EKT</span></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="card">
+      <div class="card-title">Boshqaruv</div>
+      <button class="btn" id="btn-start" onclick="startCamera()" disabled>▶ Kamerani yoqish</button>
+      <button class="btn red" id="btn-stop" onclick="stopCamera()" disabled>■ To'xtatish</button>
+      <button class="btn" id="btn-snap" onclick="takeSnapshot()" disabled>📸 Surat olish</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Sozlamalar</div>
+      <div class="slider-row">
+        <label>Ishonch darajasi <span id="conf-lbl">50%</span></label>
+        <input type="range" id="conf-slider" min="10" max="95" value="50"
+          oninput="confThreshold=this.value/100;document.getElementById('conf-lbl').textContent=this.value+'%'">
+      </div>
+      <div class="slider-row">
+        <label>Chiziq qalinligi <span id="line-lbl">2</span></label>
+        <input type="range" id="line-slider" min="1" max="5" value="2"
+          oninput="lineWidth=+this.value;document.getElementById('line-lbl').textContent=this.value">
+      </div>
+    </div>
+
+    <div class="card" style="flex:1">
+      <div class="card-title">Aniqlangan ob'ektlar</div>
+      <div id="obj-list"><p class="empty">Hali hech narsa aniqlanmadi</p></div>
+    </div>
+  </div>
+</div>
+
+<div id="status-bar">Holat: <span id="status-msg">Model yuklanmoqda...</span></div>
+
+<!-- TF.js va COCO-SSD — ishonchli CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+<script>
+let model = null;
+let detecting = false;
+let confThreshold = 0.50;
+let lineWidth = 2;
+let lastTime = performance.now();
+let frameCount = 0;
+
+const video  = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+
+const PALETTE = ['#00e5ff','#ff4d4d','#4dff91','#ffdd00','#bf5fff','#ff8800','#00cfff','#ff4db3','#a8ff3e','#ff6b6b'];
+function getColor(cls){ let h=0; for(let c of cls) h=(h*31+c.charCodeAt(0))%PALETTE.length; return PALETTE[h]; }
+
+async function loadModel(){
+  try {
+    setStatus('AI model yuklanmoqda...');
+    await tf.ready();
+    model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('btn-start').disabled = false;
+    setStatus('Model tayyor! Kamerani yoqing.');
+  } catch(e){
+    document.getElementById('load-msg').textContent = 'Xatolik: ' + e.message;
+    setStatus('Model yuklanmadi: ' + e.message);
+  }
+}
+
+async function startCamera(){
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode:'environment', width:{ideal:640}, height:{ideal:480} }
+    });
+    video.srcObject = stream;
+    await video.play();
+    canvas.width  = video.videoWidth  || 640;
+    canvas.height = video.videoHeight || 480;
+    document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-stop').disabled  = false;
+    document.getElementById('btn-snap').disabled  = false;
+    detecting = true;
+    setStatus('Aniqlash boshlandi...');
+    detectLoop();
+  } catch(e){
+    alert('Kamera ruxsatini bering!');
+    setStatus('Kamera xatosi: ' + e.message);
+  }
+}
+
+function stopCamera(){
+  detecting = false;
+  const stream = video.srcObject;
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  video.srcObject = null;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  document.getElementById('obj-list').innerHTML='<p class="empty">Kamera to\'xtatildi</p>';
+  document.getElementById('btn-start').disabled=false;
+  document.getElementById('btn-stop').disabled=true;
+  document.getElementById('btn-snap').disabled=true;
+  document.getElementById('fps-val').textContent='0';
+  document.getElementById('obj-count-val').textContent='0';
+  setStatus("Kamera to'xtatildi.");
+}
+
+async function detectLoop(){
+  if(!detecting) return;
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  try {
+    const preds = await model.detect(video, undefined, confThreshold);
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    drawBoxes(preds);
+    updateList(preds);
+    frameCount++;
+    const now = performance.now();
+    if(now - lastTime >= 600){
+      document.getElementById('fps-val').textContent = (frameCount/((now-lastTime)/1000)).toFixed(1);
+      frameCount=0; lastTime=now;
+    }
+  } catch(e){}
+  requestAnimationFrame(detectLoop);
+}
+
+function drawBoxes(preds){
+  preds.forEach(p=>{
+    if(p.score < confThreshold) return;
+    const [x,y,w,h] = p.bbox;
+    const color = getColor(p.class);
+    // To'rtburchak
+    ctx.strokeStyle=color; ctx.lineWidth=lineWidth;
+    ctx.strokeRect(x,y,w,h);
+    // Burchaklar
+    const c=12; ctx.lineWidth=lineWidth+1;
+    [[x,y],[x+w,y],[x,y+h],[x+w,y+h]].forEach(([cx,cy])=>{
+      const dx=cx===x?1:-1, dy=cy===y?1:-1;
+      ctx.beginPath(); ctx.strokeStyle=color;
+      ctx.moveTo(cx+dx*c,cy); ctx.lineTo(cx,cy); ctx.lineTo(cx,cy+dy*c); ctx.stroke();
+    });
+    // Label
+    const label=`${p.class} ${(p.score*100).toFixed(0)}%`;
+    ctx.font=`bold 13px Courier New`;
+    const tw=ctx.measureText(label).width+10;
+    ctx.fillStyle=color+'cc';
+    ctx.fillRect(x, y>22?y-22:y, tw, 22);
+    ctx.fillStyle='#000';
+    ctx.fillText(label, x+5, y>22?y-6:y+15);
+  });
+  document.getElementById('obj-count-val').textContent = preds.length;
+}
+
+function updateList(preds){
+  const list=document.getElementById('obj-list');
+  if(!preds.length){ list.innerHTML='<p class="empty">Hech narsa aniqlanmadi</p>'; return; }
+  const g={};
+  preds.forEach(p=>{ if(!g[p.class]) g[p.class]={count:0,max:0}; g[p.class].count++; g[p.class].max=Math.max(g[p.class].max,p.score); });
+  list.innerHTML=Object.entries(g).sort((a,b)=>b[1].max-a[1].max)
+    .map(([n,v])=>`<div class="obj-item"><span class="obj-name">${n}</span><span class="obj-conf">${(v.max*100).toFixed(0)}%</span><span class="obj-count">×${v.count}</span></div>`).join('');
+}
+
+function takeSnapshot(){
+  const a=document.createElement('a');
+  a.href=canvas.toDataURL('image/png');
+  a.download=`dron_${Date.now()}.png`;
+  a.click();
+  setStatus('Surat saqlandi!');
+}
+
+function setStatus(msg){ document.getElementById('status-msg').textContent=msg; }
+
+// Sahifa yuklanganda model yuklash
+window.addEventListener('load', ()=>{
+  // TF.js va COCO-SSD skriptlari yuklangandan keyin
+  if(typeof tf !== 'undefined' && typeof cocoSsd !== 'undefined'){
+    loadModel();
+  } else {
+    document.getElementById('load-msg').textContent = "Skriptlar yuklanmadi. Internet aloqasini tekshiring.";
+  }
+});
+</script>
+</body>
+</html>
